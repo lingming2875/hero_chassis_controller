@@ -26,3 +26,7 @@
 cd /root/catkin_ws
 catkin build hero_chassis_controller
 source /root/catkin_ws/devel/setup.bash
+
+## 版本管理说明
+
+文档分支：用于分支提交与合并。

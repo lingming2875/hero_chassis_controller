@@ -27,6 +27,8 @@ cd /root/catkin_ws
 catkin build hero_chassis_controller
 source /root/catkin_ws/devel/setup.bash
 
+
 ## 版本管理说明
 
-主分支：记录底盘控制器的开发过程。
+本项目使用 Git 管理开发过程，并通过分支、合并和冲突解决记录版本变化
+

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<library path="lib/libhero_chassis_controller">
+  <class
+    name="hero_chassis_controller/HeroChassisController"
+    type="hero_chassis_controller::HeroChassisController"
+    base_class_type="controller_interface::ControllerBase">
+    <description>
+      Mecanum hero chassis controller with four-wheel PID,
+      inverse kinematics, odometry and TF.
+    </description>
+  </class>
+</library>

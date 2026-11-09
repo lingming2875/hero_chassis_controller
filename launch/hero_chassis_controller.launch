@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Load controller parameters onto the ROS parameter server. -->
+  <rosparam
+    file="$(find hero_chassis_controller)/config/hero_chassis_controller.yaml"
+    command="load"/>
+
+  <!-- Load and start the joint-state controller and chassis controller. -->
+  <node
+    name="hero_chassis_controller_spawner"
+    pkg="controller_manager"
+    type="spawner"
+    args="joint_state_controller hero_chassis_controller"
+    output="screen"/>
+</launch>

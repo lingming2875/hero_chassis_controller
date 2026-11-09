@@ -1,0 +1,56 @@
+hero_chassis_controller:
+  type: hero_chassis_controller/HeroChassisController
+
+  # Wheel order: LF, RF, LB, RB.
+  joints:
+    - left_front_wheel_joint
+    - right_front_wheel_joint
+    - left_back_wheel_joint
+    - right_back_wheel_joint
+
+  # Chassis geometry, in metres.
+  wheel_radius: 0.07625
+  wheel_base: 0.4
+  track_width: 0.4
+
+  # Command timeout and acceleration limits.
+  cmd_timeout: 0.5
+  max_linear_accel: 1.0
+  max_angular_accel: 2.0
+
+  # Coordinate frames.
+  odom_frame: "odom"
+  base_frame: "base_link"
+  global_frame: "odom"
+
+  # false: /cmd_vel uses the chassis frame.
+  # true: /cmd_vel linear velocity uses the global frame.
+  global_mode: false
+
+  # Independent PID parameters for the front-left wheel.
+  front_left_p: 2.0
+  front_left_i: 0.0
+  front_left_d: 0.0
+  front_left_i_clamp: 1.0
+
+  # Independent PID parameters for the front-right wheel.
+  front_right_p: 2.0
+  front_right_i: 0.0
+  front_right_d: 0.0
+  front_right_i_clamp: 1.0
+
+  # Independent PID parameters for the back-left wheel.
+  back_left_p: 2.0
+  back_left_i: 0.0
+  back_left_d: 0.0
+  back_left_i_clamp: 1.0
+
+  # Independent PID parameters for the back-right wheel.
+  back_right_p: 2.0
+  back_right_i: 0.0
+  back_right_d: 0.0
+  back_right_i_clamp: 1.0
+
+joint_state_controller:
+  type: joint_state_controller/JointStateController
+  publish_rate: 100

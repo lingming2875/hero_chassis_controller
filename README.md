@@ -1,41 +1,34 @@
 # hero_chassis_controller
 
-用于 Gazebo 英雄机器人麦克纳姆轮底盘的 ROS Noetic 控制器。
+这个 ROS 包用于控制 Gazebo 中的英雄机器人麦克纳姆轮底盘。示例控制器只是周期性输出几组固定力矩，这里则把 `/cmd_vel` 转换成四个轮子的目标转速，再用四套独立的 PID 闭环跟踪。PID 的计算结果通过 `hardware_interface::EffortJointInterface` 写入关节。
 
-控制器通过 `hardware_interface::EffortJointInterface` 输出四个轮子的力矩。它接收 `/cmd_vel`，经过加速度限制和麦克纳姆轮逆运动学计算目标轮速，再使用四个独立的 `control_toolbox::Pid` 进行速度闭环控制。
+控制器还会读取实际轮速，计算机体速度和里程计。结果一方面发布到 `/odom`，另一方面用于广播 `odom → base_link` 的 TF，因此后续做全局速度控制时也能使用这组坐标变换。
 
-实际轮速会用于正运动学和里程计积分，结果发布到 `/odom`，同时广播 `odom → base_link` 的 TF。
+项目从 [`rm_template`](https://github.com/gdut-dynamic-x/rm_template) 创建，开发环境为 ROS Noetic 和 Gazebo 11。
 
-本项目以 [`rm_template`](https://github.com/gdut-dynamic-x/rm_template) 为模板创建。
+## 功能与当前状态
 
-## 已实现的功能
+代码里已经包含这些功能：
 
-- 四轮独立 PID 速度控制；
-- 从 YAML 读取 PID、底盘几何尺寸和运行参数；
-- 使用 `dynamic_reconfigure` 在线修改 PID；
-- 提供 `wheel_debug` 数据，配合 `rqt_plot` 观察目标轮速、实际轮速和 PID 输出；
+- 四个轮子分别使用一个 `control_toolbox::Pid`；
+- PID、轮距、轴距等参数放在 YAML 中；
+- 可以通过 `dynamic_reconfigure` 在线改参；
+- `wheel_debug` 同时输出了目标轮速、实际轮速和 PID 力矩，方便接入 `rqt_plot`；
 - 接收 `geometry_msgs/Twist`，完成麦克纳姆轮逆运动学；
-- 根据实际轮速计算底盘速度并积分得到里程计；
-- 发布 `/odom`，广播 `odom → base_link`；
-- 可配置底盘坐标系速度模式或全局坐标系速度模式；
-- 全局模式下使用 `tf::TransformListener::transformVector()` 转换线速度；
-- 线速度和角速度加速度限制；
-- `/cmd_vel` 超时后自动清零命令。
+- 根据实际轮速进行正运动学计算和里程计积分；
+- 发布 `/odom` 和 `odom → base_link` TF；
+- 支持底盘坐标系、全局坐标系两种速度模式；
+- 全局模式下调用 `tf::TransformListener::transformVector()`；
+- 对速度命令做加速度限制，并在 `/cmd_vel` 超时后停车。
 
-当前代码已经通过编译，并完成控制器加载、基础前进命令、`wheel_debug` 和 `/odom` 输出检查。默认 PID 参数只是起始值，不能当作已经调好的最终参数。
+目前已经做过构建、控制器加载、基础前进、`wheel_debug` 输出和 `/odom` 输出检查。YAML 里的 PID 数值只是暂时可用的起点，还不是完整调参后的结果。横移、旋转、全局速度模式等功能虽然已有代码，仍需要分别实测。
 
 ## 开发环境
 
-- Ubuntu 20.04 Docker 容器；
-- ROS Noetic；
-- Gazebo 11；
-- catkin-tools；
-- C++14；
-- `rm_description_for_task` 中的英雄机器人模型。
+实际开发时使用 Ubuntu 20.04 Docker 容器，里面安装了 ROS Noetic 和 Gazebo 11。代码按 C++14 构建，构建工具是 catkin-tools，机器人模型来自 `rm_description_for_task`。
 
-宿主机系统版本不影响包本身的构建，但 ROS、Gazebo 和依赖需要正确安装在运行环境中。
 
-## 包结构
+## 文件结构
 
 ```text
 hero_chassis_controller/
@@ -56,54 +49,43 @@ hero_chassis_controller/
 └── README.md
 ```
 
-几个文件的分工如下：
+控制器的主要逻辑放在 `src/hero_chassis_controller.cpp`，成员声明位于对应的头文件。`cfg/Pid.cfg` 负责生成在线调参接口，`config/hero_chassis_controller.yaml` 保存关节名称、底盘尺寸和默认参数。
 
-| 文件 | 作用 |
-| --- | --- |
-| `hero_chassis_controller.h` | 控制器类、关节句柄、PID、TF 和里程计成员声明 |
-| `hero_chassis_controller.cpp` | 控制器生命周期、运动学、PID、里程计和坐标变换实现 |
-| `Pid.cfg` | 生成 `dynamic_reconfigure` 参数接口 |
-| `hero_chassis_controller.yaml` | 关节名称、底盘尺寸、PID 和运行参数 |
-| `hero_chassis_controller.launch` | 加载参数并启动控制器 |
-| `hero_chassis_controller_plugins.xml` | 声明 pluginlib 控制器插件 |
+启动文件只加载参数并请求 `controller_manager` 启动控制器。插件名称和导出关系则写在 `hero_chassis_controller_plugins.xml` 与 `package.xml` 中。
 
-`PidConfig.h` 不需要手写。它由 `cfg/Pid.cfg` 在构建过程中自动生成。
+构建时可能在编辑器里看到 `PidConfig.h` 不存在的提示。这个头文件由 `Pid.cfg` 自动生成，不需要手动创建。
 
 ## 依赖
 
-主要 ROS 依赖包括：
+包直接使用的 ROS 组件有：
 
-- `roscpp`
-- `controller_interface`
-- `hardware_interface`
-- `controller_manager`
-- `joint_state_controller`
-- `pluginlib`
-- `control_toolbox`
-- `dynamic_reconfigure`
-- `geometry_msgs`
-- `nav_msgs`
-- `std_msgs`
-- `tf`
+```text
+roscpp
+controller_interface
+hardware_interface
+controller_manager
+joint_state_controller
+pluginlib
+control_toolbox
+dynamic_reconfigure
+geometry_msgs
+nav_msgs
+std_msgs
+tf
+```
 
-运行仿真还需要 `rm_description_for_task`。调试和演示时可以使用：
-
-- `rqt_plot`
-- `rqt_reconfigure`
-- `teleop_twist_keyboard`
+仿真还需要 `rm_description_for_task`。如果要完成调参和键盘演示，可以再准备 `rqt_plot`、`rqt_reconfigure` 与 `teleop_twist_keyboard`。
 
 ## 获取与构建
 
-将本包和 `rm_description_for_task` 放在同一个 catkin 工作空间的 `src` 目录下。
-
-如果还没有获取本仓库：
+本包和 `rm_description_for_task` 应放在同一个 catkin 工作空间的 `src` 下。还没有克隆本仓库时，可以执行：
 
 ```bash
 cd ~/catkin_ws/src
 git clone https://github.com/lingming2875/hero_chassis_controller.git
 ```
 
-安装依赖并构建：
+随后安装依赖并构建：
 
 ```bash
 cd ~/catkin_ws
@@ -112,11 +94,11 @@ catkin build hero_chassis_controller
 source devel/setup.bash
 ```
 
-本项目使用 catkin-tools，不使用 `catkin_make`。
+这里使用 catkin-tools，不使用 `catkin_make`。
 
 ## 启动仿真和控制器
 
-先启动机器人模型和 Gazebo：
+启动顺序不要反过来。先让 ROS Master、Gazebo 和机器人模型运行起来：
 
 ```bash
 source /opt/ros/noetic/setup.bash
@@ -124,7 +106,7 @@ source ~/catkin_ws/devel/setup.bash
 roslaunch rm_description_for_task hero.launch
 ```
 
-再打开一个终端，加载并启动控制器：
+另开一个终端，再加载控制器：
 
 ```bash
 source /opt/ros/noetic/setup.bash
@@ -132,27 +114,23 @@ source ~/catkin_ws/devel/setup.bash
 roslaunch hero_chassis_controller hero_chassis_controller.launch
 ```
 
-`hero_chassis_controller.launch` 只负责加载参数和控制器，不会启动第二份 Gazebo。
+第二个 launch 不会创建新的 Gazebo 世界，它只加载 YAML，并通过 spawner 启动 `joint_state_controller` 和 `hero_chassis_controller`。
 
-不要同时启动 `simple_chassis_controller` 和本控制器。两者都要占用四个轮子的 `EffortJointInterface`，同时运行会发生资源冲突。
+如果之前启动过 `simple_chassis_controller`，不要让它继续占用这四个轮子。两个控制器同时申请相同的 `EffortJointInterface` 关节会发生资源冲突。
 
-检查控制器状态：
+控制器是否启动成功，可以直接查：
 
 ```bash
 rosservice call /controller_manager/list_controllers "{}"
 ```
 
-正常情况下，`joint_state_controller` 和 `hero_chassis_controller` 都应为 `running`。
+看到两个控制器均为 `running`，才说明已经进入正常的控制循环。
 
 ## 坐标系和轮子顺序
 
-底盘采用 ROS 常用坐标约定：
+底盘坐标系采用 ROS 的常见约定：前方是 `x` 正方向，左方是 `y` 正方向，绕 `z` 轴逆时针旋转为正。
 
-- `x` 轴指向底盘前方；
-- `y` 轴指向底盘左方；
-- 绕 `z` 轴逆时针旋转为正。
-
-四个轮子在程序中的顺序固定为：
+程序中的轮序不能随意调换：
 
 | 索引 | 轮子 | Gazebo 关节名称 |
 | --- | --- | --- |
@@ -161,30 +139,26 @@ rosservice call /controller_manager/list_controllers "{}"
 | 2 | 左后轮 LB | `left_back_wheel_joint` |
 | 3 | 右后轮 RB | `right_back_wheel_joint` |
 
-修改 YAML 中的关节顺序时，必须同时考虑逆运动学、正运动学和调试数据的顺序，不能只修改关节名称。
+逆运动学、正运动学、PID 参数和 `wheel_debug` 都使用这个顺序。只修改 YAML 中的关节排列，而不修改其他对应关系，得到的结果会错位。
 
 ## 底盘速度控制
 
-控制器订阅：
+速度命令从 `/cmd_vel` 输入，消息类型为 `geometry_msgs/Twist`。平面运动只使用三个分量：
 
-| Topic | 类型 | 含义 |
+| 消息字段 | 程序变量 | 作用 |
 | --- | --- | --- |
-| `/cmd_vel` | `geometry_msgs/Twist` | 底盘速度命令 |
+| `linear.x` | `vx` | 前进、后退 |
+| `linear.y` | `vy` | 左右横移 |
+| `angular.z` | `wz` | 原地旋转 |
 
-使用的三个速度分量为：
-
-- `linear.x`：前后速度 `vx`；
-- `linear.y`：左右速度 `vy`；
-- `angular.z`：偏航角速度 `wz`。
-
-下面的命令以 10 Hz 发布前进命令：
+例如，以 10 Hz 持续发布一个较慢的前进命令：
 
 ```bash
 rostopic pub -r 10 /cmd_vel geometry_msgs/Twist \
 "{linear: {x: 0.2, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
 ```
 
-修改其中的 `x`、`y` 和 `z` 即可测试其他运动：
+其他运动只需修改这三个数值：
 
 | 运动 | `linear.x` | `linear.y` | `angular.z` |
 | --- | ---: | ---: | ---: |
@@ -195,18 +169,17 @@ rostopic pub -r 10 /cmd_vel geometry_msgs/Twist \
 | 逆时针旋转 | 0.0 | 0.0 | 0.5 |
 | 顺时针旋转 | 0.0 | 0.0 | -0.5 |
 
-按 `Ctrl+C` 停止发布。超过 `cmd_timeout` 没有收到新命令后，控制器会将目标速度清零。
+测试时按 `Ctrl+C` 结束发布。控制器超过 `cmd_timeout` 没有收到新消息，会把速度命令清零，不需要再补发一条全零消息才能停车。
 
 ## 逆运动学
 
-设：
+记轮半径为 `r`，并定义：
 
 ```text
-r = 轮半径
 k = (wheel_base + track_width) / 2
 ```
 
-轮速单位为 `rad/s`，按照 LF、RF、LB、RB 的顺序，逆运动学为：
+按照 LF、RF、LB、RB 的顺序，四个目标轮速为：
 
 ```text
 ω0 = (vx - vy - k·wz) / r
@@ -215,22 +188,22 @@ k = (wheel_base + track_width) / 2
 ω3 = (vx - vy + k·wz) / r
 ```
 
-得到四个目标轮速后，每个轮子分别计算：
+这里的轮速单位是 `rad/s`。得到目标值以后，每个轮子独立计算速度误差：
 
 ```text
 error = desired_velocity - actual_velocity
 effort = PID(error)
 ```
 
-PID 输出通过 `EffortJointInterface::setCommand()` 写入 Gazebo 关节。
+最后由 `EffortJointInterface::setCommand()` 把 PID 输出写入对应的 Gazebo 关节。机器人能否按预期运动，不只取决于 PID，还和轮序、轮半径、`wheel_base`、`track_width` 是否填写正确有关。
 
 
 
-## 四轮独立 PID
+## 四轮 PID 与在线调参
 
-四个轮子各有一个 `control_toolbox::Pid`，不是四个轮子共用一个 PID 对象。
+四个轮子各有一套 `control_toolbox::Pid`。这样写并不是为了增加代码量：受负载、摩擦和接触状态影响，四个轮子的响应不会完全一样，共用一个 PID 对象反而难以分别调整。
 
-YAML 中使用的参数前缀为：
+YAML 使用下面的前缀区分轮子：
 
 ```text
 front_left_
@@ -239,16 +212,7 @@ back_left_
 back_right_
 ```
 
-每个轮子都有四个参数：
-
-```text
-p
-i
-d
-i_clamp
-```
-
-例如左前轮：
+每个前缀下都有 `p`、`i`、`d` 和 `i_clamp`。以左前轮为例：
 
 ```yaml
 front_left_p: 2.0
@@ -257,41 +221,39 @@ front_left_d: 0.0
 front_left_i_clamp: 1.0
 ```
 
-修改 YAML 后，需要重新加载控制器。通过 `rqt_reconfigure` 修改的是运行时参数，默认不会自动写回 YAML。
-
-打开在线调参界面：
+控制器运行时，可以打开动态调参界面：
 
 ```bash
 rosrun rqt_reconfigure rqt_reconfigure
 ```
 
-在界面中选择：
+在参数树中找到：
 
 ```text
 /hero_chassis_controller
 ```
 
-调参时结合 `rqt_plot` 看响应，不要只凭机器人“看起来能动”判断参数是否合适。可以先调 P，再根据超调和振荡情况调整 D；确有稳态误差时再加入少量 I。
+这里修改的是当前运行参数，不会替你编辑 YAML。找到比较合适的数值后，还要手动写回配置文件，否则下次启动仍会使用原来的值。
 
-## wheel_debug 与 rqt_plot
+调参时建议同时打开轮速曲线。先改 P，观察响应是否过慢或者开始振荡，再决定是否需要 D；确实存在稳态误差时，再加入少量 I。只看机器人能动起来，很难判断参数是否合适。
 
-控制器发布：
+## 用 wheel_debug 查看轮速
+
+为了方便调参，控制器额外发布了：
 
 | Topic | 类型 |
 | --- | --- |
-| `/hero_chassis_controller/wheel_debug` | `std_msgs/Float64MultiArray` |
+| `/hero_chassis_controller/wheel_debug` | `std_msgs::Float64MultiArray` |
 
-数组共有 12 个元素：
+一条消息包含 12 个数值：
 
-| 下标 | 数据 |
+| 下标 | 含义 |
 | --- | --- |
-| `data[0..3]` | 四轮目标角速度 |
-| `data[4..7]` | 四轮实际角速度 |
-| `data[8..11]` | 四轮 PID 输出力矩 |
+| `data[0..3]` | 目标轮速 |
+| `data[4..7]` | 实际轮速 |
+| `data[8..11]` | PID 输出力矩 |
 
-每一组内部都按照 LF、RF、LB、RB 排列。
-
-绘制左前轮的目标速度、实际速度和 PID 输出：
+三组数据都按 LF、RF、LB、RB 排列。比如观察左前轮，可以画 `data[0]`、`data[4]` 和 `data[8]`：
 
 ```bash
 rosrun rqt_plot rqt_plot \
@@ -300,7 +262,7 @@ rosrun rqt_plot rqt_plot \
 '/hero_chassis_controller/wheel_debug/data[8]'
 ```
 
-其他轮子的对应关系为：
+其余轮子的下标如下：
 
 | 轮子 | 目标速度 | 实际速度 | PID 输出 |
 | --- | --- | --- | --- |
@@ -309,9 +271,13 @@ rosrun rqt_plot rqt_plot \
 | LB | `data[2]` | `data[6]` | `data[10]` |
 | RB | `data[3]` | `data[7]` | `data[11]` |
 
+目标速度和实际速度适合放在一起看。目标值突然变化而实际值迟迟跟不上，可能是增益偏小、输出不足，也可能是命令变化本身太快；只盯着力矩曲线反而容易漏掉问题。
+
 ## 正运动学与里程计
 
-控制器读取四个轮子的实际速度，通过正运动学计算机体速度：
+里程计没有直接读取 Gazebo 中机器人的真实位置，而是使用四个轮子的实际转速计算。这样更接近实际机器人上能够获得的测量数据。
+
+正运动学公式为：
 
 ```text
 vx = r/4 · (ω0 + ω1 + ω2 + ω3)
@@ -319,38 +285,38 @@ vy = r/4 · (-ω0 + ω1 + ω2 - ω3)
 wz = r/(4k) · (-ω0 + ω1 - ω2 + ω3)
 ```
 
-位置和偏航角通过离散积分更新。平移积分使用中点偏航角：
+得到机体速度后，程序按控制周期进行积分。平移部分使用中点偏航角：
 
 ```text
 midpoint_yaw = yaw + wz·dt/2
 ```
 
-随后发布：
+每个周期都会更新 `x`、`y` 和 `yaw`，然后发布两类数据：
 
 | 数据 | 内容 |
 | --- | --- |
 | `/odom` | `nav_msgs/Odometry` |
 | TF | `odom → base_link` |
 
-查看里程计：
+查看消息：
 
 ```bash
 rostopic echo /odom
 ```
 
-检查 TF：
+也可以直接检查坐标变换：
 
 ```bash
 rosrun tf tf_echo odom base_link
 ```
 
-控制器每次进入 `starting()` 时会将内部里程计位置清零。
+每次调用控制器的 `starting()`，内部位置都会重新从零开始。
 
-这里的里程计完全来自轮速。轮子打滑、地面接触变化和几何参数误差都会影响结果，麦克纳姆轮横移时尤其明显。它不是绝对定位。
+轮速里程计并不等同于真实位置。轮子打滑、模型尺寸误差和地面接触变化都会带来偏差，横移时尤其明显。短时间演示通常足够，但不能把它当作绝对定位结果。
 
-## 底盘与全局速度模式
+## 两种速度模式
 
-配置文件中的 `global_mode` 用于切换 `/cmd_vel` 的解释方式。
+`global_mode` 决定 `/cmd_vel` 应该在哪一个坐标系下解释。
 
 ### 底盘坐标系模式
 
@@ -358,7 +324,7 @@ rosrun tf tf_echo odom base_link
 global_mode: false
 ```
 
-`linear.x` 和 `linear.y` 直接视为底盘坐标系下的速度。
+这是当前默认配置。`linear.x` 始终沿底盘前后方向，`linear.y` 沿左右方向。机器人转过一定角度以后，相同的速度命令也会跟着底盘一起改变方向。
 
 ### 全局坐标系模式
 
@@ -367,17 +333,17 @@ global_frame: "odom"
 global_mode: true
 ```
 
-控制器将全局坐标系下的线速度向量通过 `transformVector()` 转换到 `base_link`，再执行逆运动学。
+切换到该模式后，线速度先被看作 `odom` 下的向量，再通过 `transformVector()` 转到 `base_link`。转换完成后，才进入逆运动学和轮速 PID。
 
-这里变换的是速度向量，不是位置点，因此不应把 `odom` 原点的平移量加到速度上。`angular.z` 不参与平面线速度向量变换。
+这里处理的是速度向量，不是一个位置点，所以不能把两个坐标系原点之间的平移量加到速度上。`angular.z` 也不随这次平面线速度变换修改。
 
-如果 TF 查询失败，控制器会将线速度命令清零，避免把未变换的全局速度直接当成底盘速度执行。
+TF 查询失败时，程序会把线速度清零。未经转换的全局速度不能直接当成底盘速度执行，否则机器人可能朝错误方向运动。
 
-修改模式后重新加载控制器，再检查 `/odom` 和 TF 是否正常。
+修改模式后需要重新加载控制器。测试前还应确认 `/odom` 和 `odom → base_link` TF 都在正常更新。
 
 ## 加速度限制与命令超时
 
-默认参数：
+目前的相关配置为：
 
 ```yaml
 cmd_timeout: 0.5
@@ -385,25 +351,21 @@ max_linear_accel: 1.0
 max_angular_accel: 2.0
 ```
 
-加速度限制按控制周期计算允许的最大变化量：
+加速度限制不是简单地截断最大速度，而是限制每个控制周期内命令能改变多少：
 
 ```text
 max_delta = max_accel · dt
 ```
 
-它分别作用于：
+`linear.x`、`linear.y` 和 `angular.z` 分别进行这项处理。这样，键盘或测试命令中的速度阶跃不会立刻变成轮速 PID 的阶跃输入。
 
-- `linear.x`
-- `linear.y`
-- `angular.z`
+需要注意，这里限制的是命令变化率，并不保证 Gazebo 中机体的实际加速度永远不超过该数值。实际响应还会受到 PID、轮地接触和仿真物理参数影响。
 
-这样可以避免目标速度阶跃变化直接传到轮速 PID。限制的是命令变化率，不是 Gazebo 中机器人的绝对加速度上限。
+`cmd_timeout` 用来处理命令发布者退出的情况。控制器从未收到命令，或者最近一条命令已经超过超时时间，都会将命令清零。
 
-`cmd_timeout` 用于处理命令发布者退出或通信中断。没有收到过命令，或者命令超过超时时间未更新，控制器都会将命令清零。
+## 配置文件里的主要参数
 
-## 主要配置参数
-
-配置位于 `config/hero_chassis_controller.yaml`。
+这些参数位于 `config/hero_chassis_controller.yaml`：
 
 | 参数 | 当前值 | 含义 |
 | --- | ---: | --- |
@@ -418,13 +380,13 @@ max_delta = max_accel · dt
 | `global_frame` | `odom` | 全局速度命令所在坐标系 |
 | `global_mode` | `false` | 是否启用全局速度模式 |
 
-`wheel_base` 和 `track_width` 应与机器人实际模型一致。只凭轮子在转不能证明几何参数正确，横移和旋转测试更容易暴露尺寸或轮序问题。
+轮半径、轴距和轮距最好从模型中核对。前进时四个轮子都在转，并不能证明这些参数正确；到了横移和旋转测试，尺寸误差和轮序错误通常才会明显暴露出来。
 
-## 控制器如何被加载
+## 控制器是怎样进入 Gazebo 的
 
-本包不是通过 `rosrun` 启动一个独立控制节点，而是作为 `ros_control` 控制器插件运行。
+这个包没有一个需要通过 `rosrun` 启动的独立控制节点。真正的可执行控制器以插件形式编译成动态库，再由 Gazebo 中的 `controller_manager` 加载。
 
-加载过程为：
+整条加载链是：
 
 ```text
 PLUGINLIB_EXPORT_CLASS
@@ -432,80 +394,80 @@ PLUGINLIB_EXPORT_CLASS
 → package.xml 中的 controller_interface export
 → YAML 中的控制器 type
 → controller_manager/spawner
-→ Gazebo 中的 gzserver 调用控制器 update()
+→ gzserver 周期调用控制器 update()
 ```
 
-插件声明为：
+YAML 中指定的插件名称为：
 
 ```text
 hero_chassis_controller/HeroChassisController
 ```
 
-控制器继承：
+类本身继承自：
 
 ```cpp
 controller_interface::Controller<
     hardware_interface::EffortJointInterface>
 ```
 
-因此，控制器列表为空时应先检查参数是否加载、插件是否导出以及 spawner 是否运行，而不是反复执行 `rosrun`。
+所以控制器列表为空时，反复执行 `rosrun` 没有用。应该检查插件是否导出、参数是否加载、spawner 是否运行，以及 `gzserver` 终端有没有相关错误。
 
 ## 键盘控制
 
-安装并运行 `teleop_twist_keyboard` 后，可以通过键盘向 `/cmd_vel` 发布速度：
+安装 `teleop_twist_keyboard` 后，可以用键盘发布 `/cmd_vel`：
 
 ```bash
 rosrun teleop_twist_keyboard teleop_twist_keyboard.py
 ```
 
-键盘节点只负责发布速度命令，轮速计算、PID 和里程计仍由本控制器完成。
+键盘节点只负责产生速度消息，不直接驱动轮子。后面的坐标变换、逆运动学、四轮 PID 和里程计仍由本控制器处理。
 
-## 当前验证记录
+## 验证记录
 
-已经完成：
+目前已经完成的检查包括：
 
-- `catkin build hero_chassis_controller` 构建检查；
-- pluginlib 加载和 controller_manager 启动检查；
-- 基础 `/cmd_vel` 前进命令检查；
-- `wheel_debug` 数据输出检查；
-- `/odom` 数据输出检查；
-- 停止持续发布命令后的基础停车检查。
+- `catkin build hero_chassis_controller` 构建通过；
+- pluginlib 能加载插件，controller_manager 能启动控制器；
+- 基础前进命令可以执行；
+- `wheel_debug` 有数据输出；
+- `/odom` 有数据输出；
+- 停止持续发布命令后，基础停车流程可以执行。
 
-后续演示前还应分别补测并记录：
+正式录视频前，还需要把下面几项分别跑一遍，并保留曲线或终端结果：
 
 - 后退、左右横移和原地旋转；
-- `rqt_plot` 轮速响应曲线；
-- `rqt_reconfigure` 在线修改四轮 PID；
+- `rqt_plot` 中的目标轮速和实际轮速；
+- `rqt_reconfigure` 在线修改 PID；
 - `tf_echo odom base_link`；
-- `global_mode: true` 下的全局速度控制；
-- 键盘控制；
-- 加速度限制和命令超时的实际效果。
+- `global_mode: true` 时的全局速度控制；
+- `teleop_twist_keyboard` 键盘操作；
+- 加速度限制和命令超时的实际表现。
 
-代码中存在某个功能，不等于该功能已经实测通过。完成一项测试后，应同步更新本节和对应的 Git 提交。
+代码里写了某个功能，只能说明实现已经加入，不能代替运行验证。后续每完成一项测试，都应该更新这里，避免 README 与仓库实际状态脱节。
 
 ## 常见问题
 
-### `Unable to communicate with master`
+### 提示 `Unable to communicate with master`
 
-ROS Master 或 Gazebo 仿真尚未运行。先启动 `rm_description_for_task` 的 `hero.launch`，再启动控制器。
+通常是 ROS Master 或 Gazebo 还没启动。先运行 `rm_description_for_task` 的 `hero.launch`，再启动控制器，不必因此重新编译代码。
 
-### 控制器列表为空
+### 查询不到控制器
 
-`hero.launch` 只负责机器人描述和 Gazebo 模型，不会自动加载本包控制器。还需要运行：
+`hero.launch` 不负责加载本包。模型出现以后，还需要另外执行：
 
 ```bash
 roslaunch hero_chassis_controller hero_chassis_controller.launch
 ```
 
-### 启动时提示关节资源冲突
+### 启动时发生关节资源冲突
 
-检查 `simple_chassis_controller` 是否仍在运行。同一组 `EffortJointInterface` 关节不能同时交给两个控制器。
+检查示例 `simple_chassis_controller` 是否仍在运行。同一组 `EffortJointInterface` 关节不能同时被两个控制器占用。
 
-### 修改 PID 后重新启动又恢复原值
+### 在线调好的 PID 重启后消失
 
-`rqt_reconfigure` 不会自动保存到 YAML。确认参数合适后，需要手动写回 `config/hero_chassis_controller.yaml`。
+这是正常现象。`rqt_reconfigure` 修改的是运行参数，不会自动保存文件。确认数值后，手动写回 `config/hero_chassis_controller.yaml`。
 
-## 模板与参考
+## 模板与参考资料
 
 - [rm_template](https://github.com/gdut-dynamic-x/rm_template)
 - [simple_chassis_controller](https://github.com/gdut-dynamic-x/simple_chassis_controller)
@@ -516,17 +478,15 @@ roslaunch hero_chassis_controller hero_chassis_controller.launch
 - [dynamic_reconfigure](http://wiki.ros.org/dynamic_reconfigure)
 - [tf](http://wiki.ros.org/tf)
 
-## 版本管理
+## Git 开发记录
 
-开发过程使用 Git 记录。包初始化、文档修改、分支合并和 README 冲突解决均保留在提交历史中。
-
-查看历史：
+这个包的初始化、文档修改、分支合并以及 README 冲突解决都保留在 Git 历史中。可以通过下面的命令查看：
 
 ```bash
 git log --oneline --graph --decorate --all
 ```
 
-后续修改应拆分成含义明确的提交，例如：
+后续提交尽量按实际修改内容拆分，不要把运动学、里程计、调参记录和文档更新全部塞进同一个 commit。例如：
 
 ```text
 Add mecanum inverse kinematics.
@@ -534,3 +494,4 @@ Add wheel odometry and TF.
 Verify chassis and global velocity modes.
 Update controller usage and test results.
 ```
+
